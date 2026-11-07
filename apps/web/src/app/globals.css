@@ -1,5 +1,3 @@
-@import 'tailwindcss';
-
 :root { color-scheme: dark; --background: #090b12; --foreground: #f5f7fb; --muted: #9aa4b2; --accent: #8b7cff; }
 * { box-sizing: border-box; }
 html, body { min-height: 100%; }
