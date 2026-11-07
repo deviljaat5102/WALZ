@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "WALZ",
+    "slug": "walz",
+    "scheme": "walz",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.walz.app"
+    },
+    "android": {
+      "package": "com.walz.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#090b12"
+      }
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
