@@ -2,14 +2,17 @@
   "name": "walz",
   "private": true,
   "version": "0.1.0",
-  "packageManager": "pnpm@10.0.0",
+  "packageManager": "yarn@1.22.22",
+  "workspaces": [
+    "apps/*"
+  ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --filter @walz/web dev",
-    "build": "pnpm --filter @walz/web build",
-    "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "dev": "yarn workspace @walz/web dev",
+    "build": "yarn workspace @walz/web build",
+    "lint": "yarn workspaces run lint",
+    "typecheck": "yarn workspaces run typecheck"
   }
 }
