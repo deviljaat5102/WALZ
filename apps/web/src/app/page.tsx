@@ -1,19 +1,2 @@
 import Link from 'next/link';
-
-const items = [
-  { label: 'One platform', detail: 'Website, admin workspace and Android app.' },
-  { label: 'Connected data', detail: 'A shared Supabase backend with secure access policies.' },
-  { label: 'Built to grow', detail: 'A modular foundation ready for real product features.' },
-];
-
-export default function HomePage() {
-  return <main style={{ maxWidth: 1080, margin: '0 auto', padding: '72px 24px' }}>
-    <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 100 }}><strong style={{ letterSpacing: 5, fontSize: 22 }}>WALZ</strong><Link href="/admin" style={{ border: '1px solid #37344f', borderRadius: 999, padding: '10px 18px' }}>Admin workspace ↗</Link></nav>
-    <p style={{ color: '#a99fff', letterSpacing: 3, fontSize: 12 }}>ONE PLATFORM · CONNECTED EXPERIENCES</p>
-    <h1 style={{ fontSize: 'clamp(48px, 8vw, 88px)', lineHeight: 1.02, maxWidth: 850, margin: '20px 0' }}>Everything connected.<br/><span style={{ color: '#a99fff' }}>Built around you.</span></h1>
-    <p style={{ color: '#aab2c0', fontSize: 18, lineHeight: 1.7, maxWidth: 650 }}>WALZ brings the web experience, operations dashboard and Android app together on one secure foundation.</p>
-    <div style={{ display: 'flex', gap: 14, marginTop: 32, flexWrap: 'wrap' }}><Link href="/admin" style={{ background: '#8b7cff', color: '#090b12', padding: '14px 22px', borderRadius: 12, fontWeight: 700 }}>Open workspace</Link><a href="#platform" style={{ border: '1px solid #37344f', padding: '14px 22px', borderRadius: 12 }}>Explore platform</a></div>
-    <section id="platform" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 16, marginTop: 100 }}>{items.map(item => <article key={item.label} style={{ background: 'rgba(255,255,255,.04)', border: '1px solid #28283b', borderRadius: 18, padding: 24 }}><h2 style={{ fontSize: 20 }}>{item.label}</h2><p style={{ color: '#aab2c0', lineHeight: 1.6 }}>{item.detail}</p></article>)}</section>
-    <footer style={{ marginTop: 100, color: '#737d8c', fontSize: 13 }}>© {new Date().getFullYear()} WALZ · Initial platform foundation</footer>
-  </main>;
-}
+export default function HomePage(){return <main className="home-wrap"><nav className="home-nav"><Link href="/" className="home-brand">WALZ<span>.</span></Link><div><Link href="/admin">Admin workspace ↗</Link><Link className="nav-login" href="/admin">Sign in</Link></div></nav><section className="home-hero"><div className="home-tag"><i/> WALZ DIGITAL PLATFORM</div><h1>One platform.<br/><span>Every connection.</span></h1><p>Trade, manage and grow with a connected experience across your WALZ web platform and Android app.</p><div className="home-actions"><Link href="/admin" className="home-cta">Explore dashboard ↗</Link><a href="#features" className="home-secondary">Discover WALZ ↓</a></div><div className="home-orbit"><div className="orbit-ring ring-one"/><div className="orbit-ring ring-two"/><div className="orbit-core">W<span>.</span></div><div className="orbit-chip chip-one">◈ Secure wallet</div><div className="orbit-chip chip-two">⇄ P2P marketplace</div><div className="orbit-chip chip-three">▥ Smart dashboard</div></div></section><section id="features" className="home-features"><div className="home-section-head"><span>THE WALZ ECOSYSTEM</span><h2>Everything in one place.</h2></div><div className="home-feature-grid">{[['01','Marketplace','INR and USDT offer discovery with a transparent order journey.'],['02','Secure operations','Account controls, transaction history and role-based access.'],['03','Connected admin','A central workspace for users, orders, support and reporting.']].map(x=><article key={x[0]}><small>{x[0]} / WALZ</small><h3>{x[1]}</h3><p>{x[2]}</p></article>)}</div></section><footer className="home-footer">WALZ DIGITAL PLATFORM <span>© 2026</span></footer></main>}
