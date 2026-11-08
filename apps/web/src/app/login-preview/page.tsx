@@ -7,7 +7,6 @@ export default function LoginPreview(){
  const [password,setPassword]=useState("");
  const [otp,setOtp]=useState("");
  return <main className="login-device">
-  <div className="login-status"><span>12:40</span><span>▥ ◕ ◆ 5G ▰ 12%</span></div>
   <header className="login-hero"><h1>Welcome Back!</h1><p>Enter your registered account to sign in</p></header>
   <section className="login-panel">
    <label>Mobile Number</label>
@@ -19,6 +18,5 @@ export default function LoginPreview(){
    <button type="button" className="sign-in">SIGN IN</button>
    <p className="signup-line">Not registered yet? <button type="button">Sign Up Free</button></p>
   </section>
-  <div className="login-android"><span>◀</span><span>●</span><span>■</span></div>
  </main>;
 }
