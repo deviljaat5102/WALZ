@@ -64,6 +64,35 @@ export default function HomeScreen() {
     else { Alert.alert('Payment submitted', 'The seller can now verify the bank credit.'); setUtrs(v => ({...v, [order.id]: ''})); await load(); }
   };
 
+  const cancelOrder = (order: Order) => {
+    Alert.alert('Cancel unpaid order?', 'This releases the seller\'s reserved asset. Only cancel if payment has not been sent.', [
+      { text: 'Keep order', style: 'cancel' },
+      { text: 'Cancel order', style: 'destructive', onPress: async () => {
+        if (!supabase) return;
+        setBusyId(order.id);
+        const { error } = await supabase.rpc('cancel_p2p_order', { p_order_id: order.id });
+        setBusyId(null);
+        if (error) Alert.alert('Could not cancel', error.message);
+        else { Alert.alert('Order cancelled', 'Reserved asset has been released.'); await load(); }
+      } },
+    ]);
+  };
+
+  const raiseDispute = (order: Order) => {
+    Alert.prompt?.('Report a problem', 'Explain what happened. Do not share passwords or OTPs.', [
+      { text: 'Back', style: 'cancel' },
+      { text: 'Submit dispute', onPress: async (reason?: string) => {
+        if (!supabase) return;
+        if (!reason?.trim()) { Alert.alert('Reason required', 'Enter a short reason.'); return; }
+        setBusyId(order.id);
+        const { error } = await supabase.rpc('raise_p2p_dispute', { p_order_id: order.id, p_reason: reason.trim() });
+        setBusyId(null);
+        if (error) Alert.alert('Could not open dispute', error.message);
+        else { Alert.alert('Dispute opened', 'The order is marked for review.'); await load(); }
+      } },
+    ]);
+  };
+
   const confirmReceived = (order: Order) => {
     Alert.alert(
       'Confirm bank credit',
@@ -113,6 +142,9 @@ export default function HomeScreen() {
               <Text style={styles.sub}>Rate ₹{money(order.unit_price)} · Order {order.id.slice(0, 8).toUpperCase()}</Text>
               {canConfirm && <Pressable style={styles.confirmButton} disabled={busyId === order.id} onPress={() => confirmReceived(order)}>{busyId === order.id ? <ActivityIndicator color="#080912" /> : <Text style={styles.confirmText}>VERIFY BANK CREDIT</Text>}</Pressable>}
               {seller && order.status === 'matched' && <Text style={styles.hint}>Waiting for buyer to submit payment details.</Text>}
+              {order.status === 'matched' && <Pressable style={styles.secondaryButton} disabled={busyId === order.id} onPress={() => cancelOrder(order)}><Text style={styles.secondaryText}>CANCEL UNPAID ORDER</Text></Pressable>}
+              {(order.status === 'matched' || order.status === 'payment_submitted') && <Pressable style={styles.disputeButton} disabled={busyId === order.id} onPress={() => raiseDispute(order)}><Text style={styles.disputeText}>REPORT A PROBLEM</Text></Pressable>}
+              {order.status === 'disputed' && <Text style={styles.hint}>This order is under review. Do not send more money or release assets.</Text>}
               {!seller && order.status === 'matched' && <View style={styles.paymentBox}>
                 <Text style={styles.paymentTitle}>PAY SELLER DIRECTLY</Text>
                 {paymentDetails[order.id] ? <>
@@ -175,7 +207,7 @@ const styles = StyleSheet.create({
   amount: { color: '#fff', fontSize: 26, fontWeight: '800', marginTop: 16 },
   asset: { color: '#999bb0', fontSize: 10, fontWeight: '600' },
   sub: { color: '#9296aa', fontSize: 11, marginTop: 6 },
-  confirmButton: { backgroundColor: '#b5a8ff', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 18 },
+  secondaryButton: { borderWidth: 1, borderColor: '#49445f', borderRadius: 11, padding: 12, alignItems: 'center', marginTop: 12 },\n  secondaryText: { color: '#c5bddf', fontWeight: '800', fontSize: 10, letterSpacing: .8 },\n  disputeButton: { borderWidth: 1, borderColor: '#68444a', borderRadius: 11, padding: 12, alignItems: 'center', marginTop: 9 },\n  disputeText: { color: '#e6a6aa', fontWeight: '800', fontSize: 10, letterSpacing: .8 },\n  confirmButton: { backgroundColor: '#b5a8ff', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 18 },
   confirmText: { color: '#0a0a13', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
   hint: { color: '#b6a9dc', fontSize: 11, marginTop: 14, lineHeight: 18 },
   paymentBox: { marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#34364b' },\n  paymentTitle: { color: '#b5a8ff', fontSize: 10, fontWeight: '900', letterSpacing: 1.3, marginBottom: 10 },\n  detailLabel: { color: '#858aa0', fontSize: 9, fontWeight: '800', letterSpacing: 1, marginTop: 10 },\n  detailValue: { color: '#f1efff', fontSize: 13, fontWeight: '600', marginTop: 3 },\n  utrInput: { marginTop: 8, borderWidth: 1, borderColor: '#3a3d55', borderRadius: 10, color: '#fff', padding: 12, fontSize: 13 },\n  notice: { marginTop: 20, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#574832', backgroundColor: '#1c1914' },
