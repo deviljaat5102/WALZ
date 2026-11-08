@@ -21,7 +21,7 @@ export default function Index() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [invite, setInvite] = useState('');
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState('123456');
   const [showPassword, setShowPassword] = useState(false);
   const [asset, setAsset] = useState<'INR' | 'USDT'>('INR');
   const [bankName, setBankName] = useState('');
