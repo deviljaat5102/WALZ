@@ -1,153 +1,127 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { supabase } from '../src/lib/supabase';
 
-type Order = { id: string; amount: number; unit_price: number; status: string; buyer_id: string; seller_id: string; created_at: string; offer_id: string; payment_method_id: string };
-type PaymentMethod = { bank_name: string; account_holder: string; account_number: string; ifsc: string; upi_id: string | null };
-const money = (n: number) => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n);
-const labels: Record<string, string> = { matched: 'PAYMENT PENDING', payment_submitted: 'VERIFY PAYMENT', completed: 'COMPLETED', disputed: 'UNDER REVIEW', cancelled: 'CANCELLED' };
+type Tab = 'Home' | 'Buy' | 'Bank' | 'Team' | 'My';
+type AuthMode = 'login' | 'signup';
+const BLUE = '#2162F5';
+const demoOffers = [
+  { amount: '40,329', income: '4,040.9', quota: '+44,369.9' },
+  { amount: '3,972', income: '405.2', quota: '+4,377.2' },
+  { amount: '35,742', income: '3,582.2', quota: '+39,324.2' },
+  { amount: '4,510', income: '459', quota: '+4,969' },
+  { amount: '14,087', income: '1,408.7', quota: '+15,495.7' },
+];
 
-export default function HomeScreen() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [details, setDetails] = useState<Record<string, PaymentMethod>>({});
-  const [utrs, setUtrs] = useState<Record<string, string>>({});
-  const [userId, setUserId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [disputeOrder, setDisputeOrder] = useState<string | null>(null);
-  const [reason, setReason] = useState('');
+export default function Index() {
+  const [tab, setTab] = useState<Tab>('Home');
+  const [auth, setAuth] = useState<AuthMode>('login');
+  const [signedIn, setSignedIn] = useState(false);
+  const [mobile, setMobile] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [invite, setInvite] = useState('');
+  const [otp, setOtp] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [asset, setAsset] = useState<'INR' | 'USDT'>('INR');
+  const [bankName, setBankName] = useState('');
+  const [holder, setHolder] = useState('');
+  const [account, setAccount] = useState('');
+  const [ifsc, setIfsc] = useState('');
+  const [upi, setUpi] = useState('');
+  const [banks, setBanks] = useState<{bank:string;holder:string;account:string;ifsc:string;upi:string}[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState('Buy History');
 
-  const load = useCallback(async () => {
-    if (!supabase) { setLoading(false); return; }
+  const pageTitle = useMemo(() => tab === 'My' ? 'My Account' : tab, [tab]);
+
+  const sendOtp = async () => {
+    if (mobile.length !== 10) return Alert.alert('Mobile number', 'Enter a valid 10-digit mobile number.');
+    if (!supabase) return Alert.alert('Setup required', 'Supabase environment keys are not configured for this app yet.');
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithOtp({ phone: '+91' + mobile });
+    setBusy(false);
+    Alert.alert(error ? 'OTP could not be sent' : 'OTP requested', error?.message ?? 'OTP request sent. SMS provider configuration is required for delivery.');
+  };
+
+  const authenticate = async () => {
+    if (mobile.length !== 10 || password.length < 6) return Alert.alert('Check details', 'Enter your 10-digit mobile number and a password of at least 6 characters.');
+    if (auth === 'signup' && password !== confirm) return Alert.alert('Password mismatch', 'Both passwords must match.');
+    if (!supabase) return Alert.alert('Setup required', 'Supabase environment keys are not configured for this app yet.');
+    setBusy(true);
+    const result = auth === 'login'
+      ? await supabase.auth.signInWithPassword({ phone: '+91' + mobile, password })
+      : await supabase.auth.signUp({ phone: '+91' + mobile, password, options: { data: { invitation_code: invite } } });
+    setBusy(false);
+    if (result.error) return Alert.alert('Authentication failed', result.error.message);
+    if (auth === 'signup') return Alert.alert('Account request submitted', 'Complete phone verification if Supabase requests an OTP.');
+    setSignedIn(true);
+  };
+
+  const saveBank = async () => {
+    if (!bankName.trim() || !holder.trim() || account.trim().length < 6 || !ifsc.trim()) return Alert.alert('Missing details', 'Bank name, account holder, account number and IFSC are required.');
+    if (!supabase) return Alert.alert('Backend not configured', 'Bank details are not saved. Configure Supabase first.');
+    setBusy(true);
     const { data: { user } } = await supabase.auth.getUser();
-    setUserId(user?.id ?? null);
-    if (!user) { setOrders([]); setDetails({}); setLoading(false); return; }
-    const { data, error } = await supabase.from('p2p_orders')
-      .select('id,amount,unit_price,status,buyer_id,seller_id,created_at,offer_id,payment_method_id')
-      .or('buyer_id.eq.' + user.id + ',seller_id.eq.' + user.id)
-      .order('created_at', { ascending: false }).limit(30);
-    if (error) Alert.alert('Could not load orders', error.message);
-    const rows = (data ?? []) as Order[];
-    setOrders(rows);
-    const pending = rows.filter(o => o.buyer_id === user.id && o.status === 'matched');
-    const pairs = await Promise.all(pending.map(async o => {
-      const { data: pm } = await supabase.from('payment_methods').select('bank_name,account_holder,account_number,ifsc,upi_id').eq('id', o.payment_method_id).maybeSingle();
-      return pm ? [o.id, pm as PaymentMethod] as const : null;
-    }));
-    setDetails(Object.fromEntries(pairs.filter(Boolean) as [string, PaymentMethod][]));
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-  const refresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
-
-  const submitPayment = async (order: Order) => {
-    if (!supabase) return;
-    const utr = (utrs[order.id] ?? '').trim();
-    if (utr.length < 6) { Alert.alert('UTR required', 'Enter the UTR/reference after making the bank payment.'); return; }
-    setBusyId(order.id);
-    const { error } = await supabase.rpc('submit_p2p_payment', { p_order_id: order.id, p_utr: utr, p_proof_path: null });
-    setBusyId(null);
-    if (error) Alert.alert('Submission failed', error.message);
-    else { setUtrs(v => ({ ...v, [order.id]: '' })); Alert.alert('Payment submitted', 'Seller can now verify the actual bank credit.'); await load(); }
+    if (!user) { setBusy(false); return Alert.alert('Sign in required', 'Please sign in before adding a bank account.'); }
+    const { error } = await supabase.from('payment_methods').insert({ user_id: user.id, bank_name: bankName.trim(), account_holder: holder.trim(), account_number: account.trim(), ifsc: ifsc.trim().toUpperCase(), upi_id: upi.trim() || null });
+    setBusy(false);
+    if (error) return Alert.alert('Could not save bank', error.message);
+    setBanks(v => [...v, { bank: bankName, holder, account, ifsc, upi }]);
+    setBankName(''); setHolder(''); setAccount(''); setIfsc(''); setUpi('');
+    Alert.alert('Saved', 'Bank account added.');
   };
 
-  const confirmReceived = (order: Order) => Alert.alert('Confirm bank credit', 'Only confirm after checking your bank account and verifying the exact amount has arrived.', [
-    { text: 'Go back', style: 'cancel' },
-    { text: 'I verified — confirm', style: 'destructive', onPress: async () => {
-      if (!supabase) return;
-      setBusyId(order.id);
-      const { error } = await supabase.rpc('confirm_p2p_payment', { p_order_id: order.id });
-      setBusyId(null);
-      if (error) Alert.alert('Not confirmed', error.message);
-      else { Alert.alert('Order completed', 'Asset balance and transaction history updated.'); await load(); }
-    } },
-  ]);
-
-  const cancelOrder = (order: Order) => Alert.alert('Cancel unpaid order?', 'Only cancel if you have NOT sent the bank payment. Reserved asset will be released.', [
-    { text: 'Keep order', style: 'cancel' },
-    { text: 'Cancel order', style: 'destructive', onPress: async () => {
-      if (!supabase) return;
-      setBusyId(order.id);
-      const { error } = await supabase.rpc('cancel_p2p_order', { p_order_id: order.id });
-      setBusyId(null);
-      if (error) Alert.alert('Could not cancel', error.message);
-      else { Alert.alert('Order cancelled', 'Reserved asset released.'); await load(); }
-    } },
-  ]);
-
-  const submitDispute = async () => {
-    if (!supabase || !disputeOrder || !reason.trim()) { Alert.alert('Reason required', 'Please describe the problem.'); return; }
-    setBusyId(disputeOrder);
-    const { error } = await supabase.rpc('raise_p2p_dispute', { p_order_id: disputeOrder, p_reason: reason.trim() });
-    setBusyId(null);
-    if (error) Alert.alert('Could not open dispute', error.message);
-    else { setDisputeOrder(null); setReason(''); Alert.alert('Dispute opened', 'Order marked for review.'); await load(); }
-  };
+  if (!signedIn) return <AuthScreen mode={auth} setMode={setAuth} mobile={mobile} setMobile={setMobile} password={password} setPassword={setPassword} confirm={confirm} setConfirm={setConfirm} invite={invite} setInvite={setInvite} otp={otp} setOtp={setOtp} showPassword={showPassword} setShowPassword={setShowPassword} sendOtp={sendOtp} submit={authenticate} busy={busy} />;
 
   return <View style={s.screen}>
-    <View style={s.header}><View><Text style={s.kicker}>WALZ EXCHANGE</Text><Text style={s.brand}>WALZ<Text style={s.purple}>.</Text></Text></View><Text style={s.headerTag}>P2P WORKSPACE</Text></View>
-    <Modal visible={Boolean(disputeOrder)} transparent animationType="fade" onRequestClose={() => setDisputeOrder(null)}>
-      <View style={s.backdrop}><View style={s.modal}><Text style={s.modalTitle}>Report a problem</Text><Text style={s.muted}>Describe what happened. Never share passwords or OTPs.</Text>
-        <TextInput multiline value={reason} onChangeText={setReason} placeholder="Describe the issue..." placeholderTextColor="#777b91" style={s.reason} />
-        <View style={s.actions}><Pressable style={s.cancelBtn} onPress={() => setDisputeOrder(null)}><Text style={s.secondaryText}>GO BACK</Text></Pressable><Pressable style={s.primaryBtn} onPress={submitDispute}><Text style={s.primaryText}>{busyId ? 'SUBMITTING…' : 'SUBMIT DISPUTE'}</Text></Pressable></View>
-      </View></View>
-    </Modal>
-    <ScrollView contentContainerStyle={s.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#a99aff" />}>
-      <View style={s.hero}><Text style={s.kicker}>PEER TO PEER</Text><Text style={s.heroTitle}>Trade with clarity.</Text><Text style={s.muted}>Pay the seller directly. Seller checks their actual bank credit before the asset is released to the buyer.</Text>
-        <View style={s.steps}>{['Pay seller', 'Seller verifies', 'Asset credited'].map((v, i) => <View key={v} style={s.step}><Text style={s.kicker}>0{i + 1}</Text><Text style={s.stepText}>{v}</Text></View>)}</View>
-      </View>
-      <View style={s.section}><Text style={s.sectionTitle}>Your orders</Text><Text style={s.muted}>{orders.length} RECORDS</Text></View>
-      {!supabase ? <Empty title="Backend not configured" copy="Add the Supabase project URL and publishable key to the Expo environment." /> :
-        loading ? <ActivityIndicator color="#a99aff" style={{ marginTop: 32 }} /> :
-        !userId ? <Empty title="Sign in required" copy="Connect the WALZ authentication screen to view your private orders." /> :
-        orders.length === 0 ? <Empty title="No orders yet" copy="Accepted trades will appear here with their live status." /> :
-        orders.map(order => {
-          const seller = order.seller_id === userId;
-          const canVerify = seller && order.status === 'payment_submitted';
-          const pm = details[order.id];
-          return <View key={order.id} style={s.card}>
-            <View style={s.row}><Text style={s.role}>{seller ? 'YOU ARE SELLER' : 'YOU ARE BUYER'}</Text><Text style={s.status}>{labels[order.status] ?? order.status.toUpperCase()}</Text></View>
-            <Text style={s.amount}>{money(Number(order.amount))} <Text style={s.unit}>ASSET UNITS</Text></Text>
-            <Text style={s.muted}>Rate ₹{money(Number(order.unit_price))} · #{order.id.slice(0, 8).toUpperCase()}</Text>
-            {canVerify && <Pressable style={s.primaryBtnWide} disabled={busyId === order.id} onPress={() => confirmReceived(order)}><Text style={s.primaryText}>{busyId === order.id ? 'CHECKING…' : 'VERIFY BANK CREDIT'}</Text></Pressable>}
-            {seller && order.status === 'matched' && <Text style={s.note}>Waiting for buyer to submit payment details.</Text>}
-            {!seller && order.status === 'matched' && <View style={s.paymentBox}>
-              <Text style={s.kicker}>PAY SELLER DIRECTLY</Text>
-              {pm ? <>
-                <Detail label="BANK" value={pm.bank_name} /><Detail label="ACCOUNT HOLDER" value={pm.account_holder} /><Detail label="ACCOUNT NUMBER" value={pm.account_number} /><Detail label="IFSC" value={pm.ifsc} />{pm.upi_id ? <Detail label="UPI ID" value={pm.upi_id} /> : null}
-                <Text style={s.detailLabel}>PAYMENT REFERENCE / UTR</Text>
-                <TextInput value={utrs[order.id] ?? ''} onChangeText={v => setUtrs(old => ({ ...old, [order.id]: v }))} placeholder="Enter UTR after paying" placeholderTextColor="#777b91" autoCapitalize="characters" style={s.input} />
-                <Pressable style={s.primaryBtnWide} disabled={busyId === order.id} onPress={() => submitPayment(order)}><Text style={s.primaryText}>{busyId === order.id ? 'SUBMITTING…' : 'I HAVE PAID — SUBMIT UTR'}</Text></Pressable>
-                <Text style={s.note}>Only submit after sending the exact amount from your bank/UPI app.</Text>
-              </> : <Text style={s.note}>Seller payment details are unavailable. Contact support before sending money.</Text>}
-            </View>}
-            {order.status === 'matched' && <Pressable style={s.secondaryBtn} onPress={() => cancelOrder(order)}><Text style={s.secondaryText}>CANCEL UNPAID ORDER</Text></Pressable>}
-            {(order.status === 'matched' || order.status === 'payment_submitted') && <Pressable style={s.disputeBtn} onPress={() => { setDisputeOrder(order.id); setReason(''); }}><Text style={s.disputeText}>REPORT A PROBLEM</Text></Pressable>}
-            {order.status === 'payment_submitted' && !seller && <Text style={s.note}>Payment submitted. Waiting for seller verification.</Text>}
-            {order.status === 'disputed' && <Text style={s.note}>Under review. Do not send more money or release assets.</Text>}
-          </View>;
-        })}
-      <View style={s.notice}><Text style={s.noticeTitle}>Payment safety</Text><Text style={s.muted}>Never confirm from a screenshot or UTR alone. Check your actual bank statement and exact amount. WALZ does not transfer INR between bank accounts.</Text></View>
+    <StatusBar barStyle="dark-content" backgroundColor="#f3f6fa" />
+    <View style={s.topBar}><View><Text style={s.hello}>Hello,</Text><Text style={s.user}>WALZ Member</Text></View><View style={s.topActions}><Pressable style={s.roundIcon} onPress={() => Alert.alert('Support', 'Support centre will be connected here.')}><Text style={s.iconText}>◉</Text></Pressable><Pressable style={s.roundIcon} onPress={() => Alert.alert('Notifications', 'You are all caught up.')}><Text style={s.iconText}>♧</Text></Pressable></View></View>
+    <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <Text style={s.pageTitle}>{pageTitle}</Text>
+      {tab === 'Home' && <HomeContent onNavigate={setTab} />}
+      {tab === 'Buy' && <BuyContent asset={asset} setAsset={setAsset} history={history} setHistory={setHistory} />}
+      {tab === 'Bank' && <View>
+        <Text style={s.subTitle}>Bank Accounts</Text><Text style={s.muted}>Manage your bank accounts for transactions</Text>
+        {banks.map((b,i)=><View key={i} style={s.bankCard}><Text style={s.bankName}>{b.bank}</Text><Text style={s.muted}>A/C: {b.account} · UPI: {b.upi || 'N/A'}</Text><Text style={s.muted}>IFSC: {b.ifsc} · Holder: {b.holder}</Text><Text style={s.warning}>● Pending verification</Text></View>)}
+        <View style={s.formCard}><Text style={s.subTitle}>＋ Add Bank Account</Text><Field label="Bank Name" value={bankName} change={setBankName} placeholder="Enter bank name" /><Field label="Account Holder" value={holder} change={setHolder} placeholder="Name as per bank" /><Field label="Account Number" value={account} change={setAccount} placeholder="Enter account number" keyboard="numeric" /><Field label="IFSC Code" value={ifsc} change={setIfsc} placeholder="e.g. SBIN0001234" /><Field label="UPI ID (optional)" value={upi} change={setUpi} placeholder="name@bank" /><Pressable style={s.primary} onPress={saveBank} disabled={busy}><Text style={s.primaryText}>{busy ? 'SAVING…' : 'SAVE BANK ACCOUNT'}</Text></Pressable></View>
+      </View>}
+      {tab === 'Team' && <View style={s.panel}><Text style={s.subTitle}>Team & Referrals</Text><Text style={s.muted}>Your invitation code and referral activity will appear here.</Text><View style={s.refCode}><Text style={s.muted}>YOUR INVITATION CODE</Text><Text style={s.bigBlue}>—</Text></View><StatLine label="Level 1 Team" value="—" /><StatLine label="Level 2 Team" value="—" /><StatLine label="Pending Commission" value="₹0.00" /><StatLine label="Main Wallet Commission" value="₹0.00" /><Text style={s.disclaimer}>Commission figures will be shown only from eligible, verified transactions.</Text></View>}
+      {tab === 'My' && <MyContent onLogout={() => { setSignedIn(false); setPassword(''); setTab('Home'); }} />}
     </ScrollView>
+    <View style={s.nav}>{(['Home','Buy','Bank','Team','My'] as Tab[]).map((v,i)=><Pressable key={v} onPress={()=>setTab(v)} style={s.navItem}><Text style={[s.navIcon, tab===v && s.active]}>{['⌂','▣','＋','♧','☻'][i]}</Text><Text style={[s.navLabel, tab===v && s.active]}>{v}</Text></Pressable>)}</View>
   </View>;
 }
 
-function Detail({ label, value }: { label: string; value: string }) { return <View><Text style={s.detailLabel}>{label}</Text><Text style={s.detailValue}>{value}</Text></View>; }
-function Empty({ title, copy }: { title: string; copy: string }) { return <View style={s.empty}><Text style={s.emptyTitle}>{title}</Text><Text style={s.muted}>{copy}</Text></View>; }
+function AuthScreen(p: any) {
+  return <View style={s.authScreen}><StatusBar barStyle="dark-content" backgroundColor="#f3f6fa" /><View style={s.authHead}><Text style={s.authTitle}>{p.mode === 'login' ? 'Welcome Back!' : 'Sign Up Free'}</Text><Text style={s.authSub}>{p.mode === 'login' ? 'Enter your registered account to sign in' : 'Create a new account'}</Text></View><ScrollView contentContainerStyle={s.authForm} keyboardShouldPersistTaps="handled">
+    <Text style={s.label}>Mobile Number</Text><View style={s.phoneRow}><View style={s.country}><Text style={s.countryText}>+91</Text></View><TextInput style={s.input} value={p.mobile} onChangeText={(v:string)=>p.setMobile(v.replace(/\D/g,'').slice(0,10))} keyboardType="phone-pad" placeholder="Type 10-digit number" placeholderTextColor="#9aa3b2" /></View>
+    <Field label="Password" value={p.password} change={p.setPassword} placeholder="Enter password" secure={!p.showPassword} /><Pressable onPress={()=>p.setShowPassword(!p.showPassword)}><Text style={s.link}>{p.showPassword ? 'Hide password' : 'Show password'}</Text></Pressable>
+    {p.mode === 'signup' && <><Field label="Confirm Password" value={p.confirm} change={p.setConfirm} placeholder="Re-enter password" secure /><Field label="Invitation Code" value={p.invite} change={p.setInvite} placeholder="Enter invitation code" /></>}
+    <Text style={s.label}>OTP</Text><View style={s.phoneRow}><TextInput style={[s.input,{flex:1}]} value={p.otp} onChangeText={p.setOtp} keyboardType="number-pad" maxLength={6} placeholder="Enter 6-digit OTP" placeholderTextColor="#9aa3b2" /><Pressable style={s.otpBtn} onPress={p.sendOtp}><Text style={s.link}>{p.busy ? 'WAIT…' : 'Send OTP'}</Text></Pressable></View>
+    <Pressable style={s.primary} onPress={p.submit} disabled={p.busy}><Text style={s.primaryText}>{p.busy ? 'PLEASE WAIT…' : p.mode === 'login' ? 'SIGN IN' : 'CREATE ACCOUNT'}</Text></Pressable>
+    <Text style={s.switchText}>{p.mode === 'login' ? 'Not registered yet? ' : 'Already have an account? '}<Text style={s.link} onPress={()=>p.setMode(p.mode === 'login' ? 'signup' : 'login')}>{p.mode === 'login' ? 'Sign Up Free' : 'Sign In'}</Text></Text>
+  </ScrollView></View>;
+}
+
+function HomeContent({onNavigate}:{onNavigate:(t:Tab)=>void}) {
+  return <View>
+    <View style={s.banner}><Text style={s.bannerTag}>WALZ • MEMBER BENEFITS</Text><Text style={s.bannerTitle}>Smart Finance, Clear Transactions</Text><Text style={s.bannerSub}>Explore your account and marketplace activity</Text><Text style={s.bannerLink}>Explore Features  →</Text></View>
+    <View style={s.quickGrid}>{[['♙','Newbies Activity'],['✦','Invitation Rewards'],['▤','Daily Bonus'],['♧','Join Agent']].map(([ic,t])=><Pressable key={t} style={s.quick} onPress={()=>Alert.alert(t,'This module will be connected to verified account data.')}><Text style={s.quickIcon}>{ic}</Text><Text style={s.quickText}>{t}</Text></Pressable>)}</View>
+    <Pressable style={s.rupeeCard} onPress={()=>onNavigate('Buy')}><Text style={s.cardTitle}>Buy Rupee</Text><Text style={s.rewardLabel}>REWARDS</Text><Text style={s.rewardValue}>Offers</Text><Text style={s.example}>View available INR offers in Buy</Text></Pressable>
+    <Pressable style={s.usdtCard} onPress={()=>onNavigate('Buy')}><Text style={s.cardTitle}>Buy USDT</Text><Text style={s.muted}>USDT marketplace offers</Text><View style={s.statRow}><View><Text style={s.muted}>ASSET</Text><Text style={s.statValue}>USDT</Text></View><View><Text style={s.muted}>MARKET</Text><Text style={s.statValue}>Open offers</Text></View></View></Pressable>
+    <View style={s.panel}><Text style={s.subTitle}>Learn & Earn</Text><Pressable style={s.historyRow} onPress={()=>Alert.alert('Learn & Earn','Learning content will be added here.')}><Text style={s.rowIcon}>▣</Text><Text style={s.rowText}>Learning centre</Text><Text style={s.chevron}>›</Text></Pressable></View>
+  </View>;
+}
+function BuyContent(p:any) {
+  return <View><View style={s.buyHeader}><View style={s.tabs}>{(['INR','USDT'] as const).map(a=><Pressable key={a} onPress={()=>p.setAsset(a)}><Text style={[s.tabText,p.asset===a&&s.tabActive]}>{a}</Text></Pressable>)}</View><Pressable style={s.historyPill} onPress={()=>p.setHistory('INR History')}><Text style={s.historyPillText}>INR History</Text></Pressable></View><View style={s.filterPill}><Text style={s.filterText}>All</Text></View><Text style={s.demoNote}>DESIGN PREVIEW · Sample offer values, not live orders</Text>{demoOffers.map((o,i)=><View style={s.offerCard} key={i}><View style={s.offerTop}><Text style={s.offerAmount}>{p.asset==='INR'?'₹':'$'}{o.amount}</Text><Text style={s.bankBadge}>Bank</Text><Pressable style={s.buyBtn} onPress={()=>Alert.alert('Live offers not connected','These are reference-only sample cards. No payment or purchase will be initiated.')}><Text style={s.buyBtnText}>Buy</Text></Pressable></View><View style={s.offerBottom}><View><Text style={s.mutedCaps}>INCOME</Text><Text style={s.income}>{p.asset==='INR'?'₹':''}{o.income}  <Text style={s.bankBadge}>Offer</Text></Text></View><View style={{alignItems:'flex-end'}}><Text style={s.mutedCaps}>QUOTA</Text><Text style={s.quota}>{o.quota}</Text></View></View></View>)}</View>;
+}
+function MyContent({onLogout}:{onLogout:()=>void}) {
+  return <View><View style={s.profile}><View style={s.avatar}><Text style={s.avatarText}>W</Text></View><View style={{flex:1}}><Text style={s.user}>WALZ Member</Text><Text style={s.muted}>UID: —</Text></View><Text style={s.edit}>✎</Text></View><View style={s.balanceCard}>{[['TCoin Balance','₹0.00'],['Total Earnings','₹0.00'],["Today's Profit",'₹0.00']].map(([a,b])=><View key={a} style={s.balanceItem}><Text style={s.muted}>{a}</Text><Text style={s.balanceValue}>{b}</Text></View>)}</View><View style={s.panel}><Text style={s.subTitle}>Statistics</Text><View style={s.statsGrid}>{[['₹','INR'],['◆','Sell'],['₿','USDT'],['⌁','Profit']].map(([ic,t])=><View style={s.statCell} key={t}><Text style={s.statBubble}>{ic}</Text><Text style={s.statName}>{t}</Text><Text style={s.muted}>₹0.00</Text></View>)}</View></View><View style={s.panel}><Text style={s.subTitle}>History</Text>{['Buy History','Sell History','USDT History','Quota History'].map((v,i)=><Pressable style={s.historyRow} key={v}><Text style={s.rowIcon}>{['🛒','◆','₿','☷'][i]}</Text><Text style={s.rowText}>{v}</Text><Text style={s.chevron}>›</Text></Pressable>)}</View><View style={s.panel}><Text style={s.subTitle}>Setting</Text>{['Messages','Service','Account Settings','Change Password'].map(v=><Pressable style={s.historyRow} key={v}><Text style={s.rowText}>{v}</Text><Text style={s.chevron}>›</Text></Pressable>)}<Pressable style={s.logout} onPress={onLogout}><Text style={s.logoutText}>LOG OUT</Text></Pressable></View></View>;
+}
+function Field({label,value,change,placeholder,secure,keyboard}:{label:string;value:string;change:(v:string)=>void;placeholder:string;secure?:boolean;keyboard?:any}) { return <View style={s.field}><Text style={s.label}>{label}</Text><TextInput value={value} onChangeText={change} placeholder={placeholder} placeholderTextColor="#9aa3b2" secureTextEntry={secure} keyboardType={keyboard} autoCapitalize="none" style={s.inputFull} /></View>; }
+function StatLine({label,value}:{label:string;value:string}) { return <View style={s.statLine}><Text style={s.rowText}>{label}</Text><Text style={s.statValue}>{value}</Text></View>; }
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#090b12' }, header: { paddingTop: 58, paddingHorizontal: 24, paddingBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#202235' },
-  kicker: { color: '#a99aff', fontSize: 9, letterSpacing: 2, fontWeight: '800' }, brand: { color: '#f6f6ff', fontSize: 29, fontWeight: '900', letterSpacing: 4 }, purple: { color: '#a99aff' }, headerTag: { color: '#c3c4d5', fontSize: 9, letterSpacing: 1 },
-  content: { padding: 20, paddingBottom: 48 }, hero: { padding: 22, borderRadius: 24, backgroundColor: '#17162a', borderWidth: 1, borderColor: '#393253' }, heroTitle: { color: '#fff', fontSize: 28, fontWeight: '800', marginTop: 12 },
-  muted: { color: '#a8aabd', fontSize: 12, lineHeight: 19, marginTop: 7 }, steps: { flexDirection: 'row', gap: 8, marginTop: 22 }, step: { flex: 1, borderTopWidth: 1, borderTopColor: '#51496d', paddingTop: 10 }, stepText: { color: '#e5e2f3', fontSize: 10, marginTop: 5 },
-  section: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 28, marginBottom: 14 }, sectionTitle: { color: '#f5f5fc', fontSize: 19, fontWeight: '800' },
-  empty: { alignItems: 'center', padding: 28, borderRadius: 18, borderWidth: 1, borderColor: '#26283a', backgroundColor: '#10121d' }, emptyTitle: { color: '#f3f2fc', fontSize: 16, fontWeight: '700', marginBottom: 5 },
-  card: { backgroundColor: '#11131f', borderWidth: 1, borderColor: '#2b2d40', borderRadius: 18, padding: 18, marginBottom: 12 }, row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }, role: { color: '#a5a0bc', fontSize: 9, letterSpacing: 1, fontWeight: '800' }, status: { color: '#e2bd7a', fontSize: 9, fontWeight: '800' },
-  amount: { color: '#fff', fontSize: 25, fontWeight: '800', marginTop: 15 }, unit: { color: '#999bb0', fontSize: 10 }, paymentBox: { marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#34364b' }, detailLabel: { color: '#858aa0', fontSize: 9, fontWeight: '800', letterSpacing: 1, marginTop: 10 }, detailValue: { color: '#f1efff', fontSize: 13, fontWeight: '600', marginTop: 3 },
-  input: { marginTop: 8, borderWidth: 1, borderColor: '#3a3d55', borderRadius: 10, color: '#fff', padding: 12, fontSize: 13 }, primaryBtnWide: { backgroundColor: '#b5a8ff', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 16 }, primaryText: { color: '#0a0a13', fontWeight: '900', fontSize: 10, letterSpacing: .8 },
-  secondaryBtn: { borderWidth: 1, borderColor: '#49445f', borderRadius: 11, padding: 12, alignItems: 'center', marginTop: 12 }, secondaryText: { color: '#c5bddf', fontWeight: '800', fontSize: 10 }, disputeBtn: { borderWidth: 1, borderColor: '#68444a', borderRadius: 11, padding: 12, alignItems: 'center', marginTop: 9 }, disputeText: { color: '#e6a6aa', fontWeight: '800', fontSize: 10 },
-  note: { color: '#b6a9dc', fontSize: 11, marginTop: 12, lineHeight: 18 }, notice: { marginTop: 20, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#574832', backgroundColor: '#1c1914' }, noticeTitle: { color: '#f0d29b', fontWeight: '800', fontSize: 12 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,.78)', justifyContent: 'center', padding: 22 }, modal: { backgroundColor: '#171827', borderWidth: 1, borderColor: '#45405e', borderRadius: 20, padding: 20 }, modalTitle: { color: '#fff', fontSize: 20, fontWeight: '800' }, reason: { minHeight: 110, textAlignVertical: 'top', marginTop: 16, borderWidth: 1, borderColor: '#3a3d55', borderRadius: 12, color: '#fff', padding: 12 }, actions: { flexDirection: 'row', gap: 10, marginTop: 16 }, cancelBtn: { flex: 1, borderWidth: 1, borderColor: '#49445f', borderRadius: 11, padding: 13, alignItems: 'center' }, primaryBtn: { flex: 1, backgroundColor: '#b5a8ff', borderRadius: 11, padding: 13, alignItems: 'center' },
+ screen:{flex:1,backgroundColor:'#f3f6fa'},scroll:{paddingHorizontal:18,paddingTop:10,paddingBottom:26},topBar:{backgroundColor:'#fff',paddingHorizontal:22,paddingTop:58,paddingBottom:16,flexDirection:'row',alignItems:'center',justifyContent:'space-between'},hello:{color:'#9aa3b2',fontSize:13,fontWeight:'600'},user:{color:'#111827',fontSize:18,fontWeight:'800'},topActions:{flexDirection:'row',gap:12},roundIcon:{width:44,height:44,borderRadius:24,backgroundColor:'#fff',alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#edf0f4'},iconText:{fontSize:20,color:'#253247'},pageTitle:{fontSize:24,fontWeight:'800',color:'#1e293b',marginBottom:14},banner:{borderRadius:24,padding:22,backgroundColor:'#101c32',minHeight:190,justifyContent:'space-between',marginBottom:18},bannerTag:{color:'#f7c948',fontWeight:'800',fontSize:11},bannerTitle:{color:'#fff',fontSize:23,fontWeight:'900',marginTop:18},bannerSub:{color:'#c4cfdf',fontSize:13,marginTop:8},bannerLink:{color:'#f4b400',fontWeight:'800',marginTop:24},quickGrid:{flexDirection:'row',gap:8,marginBottom:18},quick:{flex:1,minHeight:112,borderRadius:18,backgroundColor:'#fff',alignItems:'center',justifyContent:'center',padding:8,borderWidth:1,borderColor:'#edf0f4'},quickIcon:{fontSize:28,color:BLUE,marginBottom:10},quickText:{fontSize:11,fontWeight:'800',color:'#253247',textAlign:'center'},rupeeCard:{padding:22,borderRadius:24,backgroundColor:'#fff7ef',borderWidth:1,borderColor:'#ffe4c8',marginBottom:16},usdtCard:{padding:22,borderRadius:24,backgroundColor:'#eef6ff',borderWidth:1,borderColor:'#d7eaff',marginBottom:18},cardTitle:{fontSize:22,fontWeight:'900',color:'#303b4d'},rewardLabel:{fontSize:12,color:'#8b9bb2',fontWeight:'800',marginTop:24},rewardValue:{fontSize:28,fontWeight:'900',color:'#162033',marginTop:6},example:{color:'#a65a23',marginTop:10,fontWeight:'700'},statRow:{flexDirection:'row',justifyContent:'space-between',marginTop:22,borderTopWidth:1,borderColor:'#dce8f6',paddingTop:18},statValue:{fontSize:20,fontWeight:'900',color:'#1f2937',marginTop:5},panel:{backgroundColor:'#fff',borderRadius:22,padding:20,marginBottom:16,borderWidth:1,borderColor:'#eef1f5'},subTitle:{fontSize:21,fontWeight:'800',color:'#1e293b',marginBottom:12},muted:{fontSize:13,color:'#9aa5b5',lineHeight:19},historyRow:{flexDirection:'row',alignItems:'center',paddingVertical:16,borderTopWidth:1,borderColor:'#f0f2f5',gap:14},rowIcon:{width:42,height:42,borderRadius:12,backgroundColor:'#eef5ff',textAlign:'center',textAlignVertical:'center',color:BLUE,fontSize:19,overflow:'hidden'},rowText:{fontSize:16,color:'#465367',flex:1},chevron:{fontSize:28,color:'#9aa5b5'},nav:{height:78,backgroundColor:'#fff',borderTopWidth:1,borderColor:'#edf0f4',flexDirection:'row',justifyContent:'space-around',alignItems:'center',paddingBottom:8},navItem:{alignItems:'center',justifyContent:'center',flex:1},navIcon:{fontSize:25,color:'#98a7ba',fontWeight:'800'},navLabel:{fontSize:11,color:'#98a7ba',fontWeight:'700',marginTop:3},active:{color:BLUE},authScreen:{flex:1,backgroundColor:'#fff'},authHead:{backgroundColor:'#101a30',paddingHorizontal:26,paddingTop:70,paddingBottom:36},authTitle:{fontSize:29,fontWeight:'900',color:'#fff'},authSub:{fontSize:15,color:'#a9b3c4',marginTop:12},authForm:{paddingHorizontal:22,paddingTop:28,paddingBottom:60},label:{fontSize:14,color:'#687386',fontWeight:'600',marginBottom:9},phoneRow:{flexDirection:'row',gap:10,alignItems:'center',marginBottom:20},country:{width:58,height:58,backgroundColor:'#f2f4f7',borderRadius:16,alignItems:'center',justifyContent:'center'},countryText:{fontSize:16,fontWeight:'800',color:'#344054'},input:{flex:1,height:58,borderWidth:1,borderColor:'#dfe5ed',backgroundColor:'#f5f7fa',borderRadius:16,paddingHorizontal:16,fontSize:15,color:'#253247'},field:{marginBottom:20},inputFull:{height:58,borderWidth:1,borderColor:'#dfe5ed',backgroundColor:'#f5f7fa',borderRadius:16,paddingHorizontal:16,fontSize:15,color:'#253247'},link:{color:BLUE,fontWeight:'700',fontSize:14,textAlign:'right',marginBottom:16},otpBtn:{height:54,paddingHorizontal:15,backgroundColor:'#eef5ff',borderRadius:14,justifyContent:'center'},primary:{height:62,backgroundColor:BLUE,borderRadius:16,alignItems:'center',justifyContent:'center',marginTop:18,shadowColor:BLUE,shadowOpacity:.2,shadowRadius:12,elevation:4},primaryText:{color:'#fff',fontSize:16,fontWeight:'900'},switchText:{textAlign:'center',fontSize:14,color:'#7b8494',marginTop:34},buyHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},tabs:{flexDirection:'row',gap:22},tabText:{fontSize:20,fontWeight:'900',color:'#1e293b'},tabActive:{color:BLUE,borderBottomWidth:3,borderColor:BLUE,paddingBottom:8},historyPill:{backgroundColor:'#fff',borderRadius:24,paddingVertical:12,paddingHorizontal:18,borderWidth:1,borderColor:'#e4eaf1'},historyPillText:{color:'#344054',fontWeight:'800'},filterPill:{backgroundColor:BLUE,borderRadius:24,alignSelf:'flex-start',paddingVertical:9,paddingHorizontal:20,marginTop:24,marginBottom:18},filterText:{color:'#fff',fontWeight:'800'},demoNote:{fontSize:10,color:'#8a94a5',fontWeight:'800',marginBottom:10,letterSpacing:.5},offerCard:{backgroundColor:'#fff',borderRadius:24,padding:20,marginBottom:16,borderWidth:1,borderColor:'#f0f2f5'},offerTop:{flexDirection:'row',alignItems:'center',gap:10},offerAmount:{fontSize:26,fontWeight:'900',color:'#121b2e'},bankBadge:{fontSize:11,color:BLUE,backgroundColor:'#eef5ff',paddingHorizontal:9,paddingVertical:5,borderRadius:7,overflow:'hidden',fontWeight:'800'},buyBtn:{marginLeft:'auto',backgroundColor:BLUE,borderRadius:24,paddingVertical:11,paddingHorizontal:26},buyBtnText:{color:'#fff',fontWeight:'900',fontSize:15},offerBottom:{flexDirection:'row',justifyContent:'space-between',borderTopWidth:1,borderColor:'#f0f2f5',marginTop:20,paddingTop:16},mutedCaps:{fontSize:11,color:'#9aa8bb',fontWeight:'800',letterSpacing:1},income:{fontSize:19,fontWeight:'900',color:BLUE,marginTop:6},quota:{fontSize:18,fontWeight:'900',color:'#253247',marginTop:6},profile:{backgroundColor:'#101a30',borderRadius:20,padding:18,flexDirection:'row',alignItems:'center',gap:14,marginBottom:14},avatar:{width:58,height:58,borderRadius:30,backgroundColor:'#e9f1ff',alignItems:'center',justifyContent:'center'},avatarText:{fontSize:25,color:BLUE,fontWeight:'900'},edit:{fontSize:23,color:BLUE,backgroundColor:'#fff',paddingHorizontal:12,paddingVertical:7,borderRadius:22},balanceCard:{backgroundColor:'#fff',borderRadius:22,padding:16,flexDirection:'row',marginBottom:16},balanceItem:{flex:1,alignItems:'center',borderRightWidth:1,borderColor:'#eef1f5',paddingHorizontal:4},balanceValue:{fontSize:16,fontWeight:'900',color:'#253247',marginTop:8},statsGrid:{flexDirection:'row',justifyContent:'space-between',marginTop:10},statCell:{alignItems:'center',flex:1},statBubble:{width:54,height:54,borderRadius:30,backgroundColor:'#eef5ff',textAlign:'center',textAlignVertical:'center',color:BLUE,fontSize:23,overflow:'hidden'},statName:{fontSize:15,fontWeight:'800',color:'#253247',marginTop:8},bankCard:{backgroundColor:'#fff',borderRadius:18,padding:18,marginTop:14,marginBottom:10},bankName:{fontSize:18,fontWeight:'800',color:'#253247'},warning:{color:'#e87979',marginTop:8,fontWeight:'700'},formCard:{backgroundColor:'#fff',borderRadius:20,padding:18,marginTop:18},refCode:{backgroundColor:'#f2f6ff',borderRadius:16,padding:18,marginVertical:14},bigBlue:{fontSize:25,fontWeight:'900',color:BLUE,marginTop:6},statLine:{flexDirection:'row',justifyContent:'space-between',paddingVertical:14,borderTopWidth:1,borderColor:'#edf0f4'},disclaimer:{fontSize:11,color:'#8994a5',marginTop:12,lineHeight:17},logout:{backgroundColor:'#fff1f1',borderRadius:12,padding:15,alignItems:'center',marginTop:18},logoutText:{color:'#d44b4b',fontWeight:'900'}
 });
