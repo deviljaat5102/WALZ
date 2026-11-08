@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { supabase } from '../src/lib/supabase';
 
 type Order = {
@@ -27,7 +27,7 @@ export default function HomeScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);\n  const [paymentDetails, setPaymentDetails] = useState<Record<string, {bank_name:string;account_holder:string;account_number:string;ifsc:string;upi_id:string|null}>>({});\n  const [utrs, setUtrs] = useState<Record<string,string>>({});
 
   const load = useCallback(async () => {
     if (!supabase) { setLoading(false); return; }
@@ -36,7 +36,7 @@ export default function HomeScreen() {
     if (!user) { setOrders([]); setLoading(false); return; }
     const { data, error } = await supabase
       .from('p2p_orders')
-      .select('id,amount,unit_price,status,buyer_id,seller_id,created_at,offer_id')
+      .select('id,amount,unit_price,status,buyer_id,seller_id,created_at,offer_id,payment_method_id')
       .or('buyer_id.eq.' + user.id + ',seller_id.eq.' + user.id)
       .order('created_at', { ascending: false })
       .limit(30);
@@ -51,6 +51,17 @@ export default function HomeScreen() {
     setRefreshing(true);
     await load();
     setRefreshing(false);
+  };
+
+  const submitPayment = async (order: Order) => {
+    if (!supabase) return;
+    const utr = (utrs[order.id] ?? '').trim();
+    if (utr.length < 6) { Alert.alert('UTR required', 'Enter the bank UTR/reference number after making the payment.'); return; }
+    setBusyId(order.id);
+    const { error } = await supabase.rpc('submit_p2p_payment', { p_order_id: order.id, p_utr: utr, p_proof_path: null });
+    setBusyId(null);
+    if (error) Alert.alert('Payment submission failed', error.message);
+    else { Alert.alert('Payment submitted', 'The seller can now verify the bank credit.'); setUtrs(v => ({...v, [order.id]: ''})); await load(); }
   };
 
   const confirmReceived = (order: Order) => {
@@ -102,6 +113,20 @@ export default function HomeScreen() {
               <Text style={styles.sub}>Rate ₹{money(order.unit_price)} · Order {order.id.slice(0, 8).toUpperCase()}</Text>
               {canConfirm && <Pressable style={styles.confirmButton} disabled={busyId === order.id} onPress={() => confirmReceived(order)}>{busyId === order.id ? <ActivityIndicator color="#080912" /> : <Text style={styles.confirmText}>VERIFY BANK CREDIT</Text>}</Pressable>}
               {seller && order.status === 'matched' && <Text style={styles.hint}>Waiting for buyer to submit payment details.</Text>}
+              {!seller && order.status === 'matched' && <View style={styles.paymentBox}>
+                <Text style={styles.paymentTitle}>PAY SELLER DIRECTLY</Text>
+                {paymentDetails[order.id] ? <>
+                  <Text style={styles.detailLabel}>BANK</Text><Text style={styles.detailValue}>{paymentDetails[order.id].bank_name}</Text>
+                  <Text style={styles.detailLabel}>ACCOUNT HOLDER</Text><Text style={styles.detailValue}>{paymentDetails[order.id].account_holder}</Text>
+                  <Text style={styles.detailLabel}>ACCOUNT NUMBER</Text><Text style={styles.detailValue}>{paymentDetails[order.id].account_number}</Text>
+                  <Text style={styles.detailLabel}>IFSC</Text><Text style={styles.detailValue}>{paymentDetails[order.id].ifsc}</Text>
+                  {!!paymentDetails[order.id].upi_id && <><Text style={styles.detailLabel}>UPI ID</Text><Text style={styles.detailValue}>{paymentDetails[order.id].upi_id}</Text></>}
+                  <Text style={styles.detailLabel}>PAYMENT REFERENCE / UTR</Text>
+                  <TextInput value={utrs[order.id] ?? ''} onChangeText={v => setUtrs(old => ({...old,[order.id]:v}))} placeholder="Enter UTR after paying" placeholderTextColor="#777b91" autoCapitalize="characters" style={styles.utrInput} />
+                  <Pressable style={styles.confirmButton} disabled={busyId === order.id} onPress={() => submitPayment(order)}>{busyId === order.id ? <ActivityIndicator color="#080912" /> : <Text style={styles.confirmText}>I HAVE PAID — SUBMIT UTR</Text>}</Pressable>
+                  <Text style={styles.hint}>Only submit after you have sent the exact amount from your bank/UPI app.</Text>
+                </> : <Text style={styles.hint}>Seller payment details are not available. Contact support before sending money.</Text>}
+              </View>}
               {!seller && order.status === 'payment_submitted' && <Text style={styles.hint}>Payment submitted. Waiting for seller to verify bank credit.</Text>}
             </View>;
           })
@@ -153,7 +178,7 @@ const styles = StyleSheet.create({
   confirmButton: { backgroundColor: '#b5a8ff', borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 18 },
   confirmText: { color: '#0a0a13', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
   hint: { color: '#b6a9dc', fontSize: 11, marginTop: 14, lineHeight: 18 },
-  notice: { marginTop: 20, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#574832', backgroundColor: '#1c1914' },
+  paymentBox: { marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#34364b' },\n  paymentTitle: { color: '#b5a8ff', fontSize: 10, fontWeight: '900', letterSpacing: 1.3, marginBottom: 10 },\n  detailLabel: { color: '#858aa0', fontSize: 9, fontWeight: '800', letterSpacing: 1, marginTop: 10 },\n  detailValue: { color: '#f1efff', fontSize: 13, fontWeight: '600', marginTop: 3 },\n  utrInput: { marginTop: 8, borderWidth: 1, borderColor: '#3a3d55', borderRadius: 10, color: '#fff', padding: 12, fontSize: 13 },\n  notice: { marginTop: 20, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#574832', backgroundColor: '#1c1914' },
   noticeTitle: { color: '#f0d29b', fontWeight: '800', fontSize: 12 },
   noticeCopy: { color: '#b8ad9c', fontSize: 11, lineHeight: 18, marginTop: 6 },
 });
