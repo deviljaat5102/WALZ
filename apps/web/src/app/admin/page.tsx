@@ -1,5 +1,5 @@
-import "./admin.css";
 "use client";
+import "./admin.css";
 import { useMemo, useState } from "react";
 const nav=[["Overview","⌂"],["Users","♙"],["Buy / Sell Orders","⇄"],["Wallet & Ledger","▤"],["Withdrawals","↗"],["Bank Accounts","▣"],["Team & Referrals","♧"],["Commissions","％"],["Disputes","⚑"],["Banners","▧"],["Products & Offers","◇"],["Messages","✉"],["Reports","▥"],["Settings","⚙"]];
 const stats=[["Total users","12,840","+12.8%","♙"],["Active traders","2,486","+8.4%","⇄"],["Trade volume","₹48.6L","+18.2%","↗"],["Open disputes","08","Needs review","⚑"]];
