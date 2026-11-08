@@ -20,7 +20,7 @@ export default function Index() {
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [invite, setInvite] = useState('');
+  const [invite, setInvite] = useState('tp3340vnxr');
   const [otp, setOtp] = useState('123456');
   const [showPassword, setShowPassword] = useState(false);
   const [asset, setAsset] = useState<'INR' | 'USDT'>('INR');
